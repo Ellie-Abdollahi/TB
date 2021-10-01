@@ -4,7 +4,7 @@ using Parameters, Distributions, StatsBase, StaticArrays, Random, Match, DataFra
 
 #health status of the individuals
 @enum HEALTH SUSC = 0 LAT = 1 LATT = 2 ACT = 3  ACTT = 4 DS = 5 UNDEF = 6
-#LATT = Latent under treatment , ACTT = Active under treatment , DS = Treatment Completed
+#LATT = Latent under treatment , ACTT = Active under treatment , DS = Dormant State
 
 #=-----------------------------
 Construct each population member
@@ -21,7 +21,6 @@ Base.@kwdef mutable struct Human
     Health:: HEALTH = SUSC
     swap::HEALTH = UNDEF #What will be their next state
     sickfrom::Int64 = 0
-    #infweek::Int16 = 99999 #The week that their infection starts Do we need this as this may happen several times
     tis::Int64 = 0 #Time in the current state
     exp::Int64 = 0 #Max time in the state
     α:: Float64 = 0
@@ -47,7 +46,7 @@ end
 ------------------------------=#
 
 Base.@kwdef mutable struct Household
-    Hid:: Int64 = 0 # We have 9820 household
+    Hid:: Int64 = 0 # We have 10356 household
     Size:: Int64 = 0
     AvailableSize:: Int64 = 0
     Infected::Bool = false
@@ -65,7 +64,7 @@ end
     compliance :: Float64 = 0
     efficacy :: Float64 = 0
 
-    β = 0.31 ## Transmission probability
+    β = 0.31 ## We get this by calibration
     θ = 0.32    ## Relapse rate (this can change by the history of the person)
     α_red = 0 #the reducion in activation probability of the person based on treatment scenario
     trace_cov = 0

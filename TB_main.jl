@@ -4,7 +4,7 @@ using Parameters, Distributions, StatsBase, StaticArrays, Random, Match, DataFra
 
 #health status of the individuals
 @enum HEALTH SUSC = 0 LAT = 1 LATT = 2 ACT = 3  ACTT = 4 DS = 5 UNDEF = 6
-#LATT = Latent under treatment , ACTT = Active under treatment , DS = Dormant State
+#LATT = Latent under treatment , ACTT = Active under treatment , DS = Treatment Completed
 
 #=-----------------------------
 Construct each population member
@@ -21,22 +21,37 @@ Base.@kwdef mutable struct Human
     Health:: HEALTH = SUSC
     swap::HEALTH = UNDEF #What will be their next state
     sickfrom::Int64 = 0
+    #infweek::Int16 = 99999 #The week that their infection starts Do we need this as this may happen several times
     tis::Int64 = 0 #Time in the current state
     exp::Int64 = 0 #Max time in the state
+
     α:: Float64 = 0
     nextweek_meets:: Int16 = 0
     Hid::Int64 = 0
 
+    
+    is_inf::Bool = false
+    is_act::Bool = false
+    is_safe::Bool = false
+
+    identified::Bool = false
     vaccinated::Bool = false
     treated::Bool = false
-    act_hist::Bool = false
-    will_act::Bool = false
     iso :: Bool = false
+    spend :: Int64 = 99999
+
     rep_contact :: Array{Int64} = [] #This is the array for repeated contacts
     same_hh :: Array{Int64} = [] #This is the array for same household members of each individual
-    HIV::Bool = false
-    Diab::Bool = false
-    renal::Bool = false
+    ##cont_hist :: Array{Array{Float64}} = [] #This is the array of last four weeks contacts of the individual
+    cont_hist_1 :: Array{Int64} = []
+    cont_hist_2 :: Array{Int64} = []
+    cont_hist_3 :: Array{Int64} = []
+    cont_hist_4 :: Array{Int64} = []
+
+
+    # HIV::Bool = false
+    # Diab::Bool = false
+    # renal::Bool = false
 
 end
 
@@ -46,7 +61,7 @@ end
 ------------------------------=#
 
 Base.@kwdef mutable struct Household
-    Hid:: Int64 = 0 # We have 10356 household
+    Hid:: Int64 = 0 # We have 9820 household
     Size:: Int64 = 0
     AvailableSize:: Int64 = 0
     Infected::Bool = false
@@ -64,8 +79,8 @@ end
     compliance :: Float64 = 0
     efficacy :: Float64 = 0
 
-    β = 0.31 ## We get this by calibration
-    θ = 0.32    ## Relapse rate (this can change by the history of the person)
+    β = 0.175
+    θ = 0.199    ## Relapse rate 
     α_red = 0 #the reducion in activation probability of the person based on treatment scenario
     trace_cov = 0
     vaccin_cov = 0   ##Vaccine coverage (will change in different scenarios)
@@ -162,8 +177,8 @@ function apply_age_g(x)
     x.AGC = get_AGC(x)
     x.AGR = get_AGR(x)
     x.α   = get_alpha(x)
-    get_comorb(x)
-    get_alpha_comorb(x)
+    # get_comorb(x)
+    # get_alpha_comorb(x)
 end
 export apply_age_g
 
@@ -186,11 +201,11 @@ function get_AGR(x)
 end
 end
 
-function get_comorb(x::Human)
-x.Diab = rand()< 0.04 ? true : false
-x.HIV = rand()< 0.0025 ? true : false
-x.renal = rand() < 0.01511 ? true : false
-end
+# function get_comorb(x::Human)
+# x.Diab = rand()< 0.04 ? true : false
+# x.HIV = rand()< 0.0025 ? true : false
+# x.renal = rand() < 0.01511 ? true : false
+# end
 
 function get_alpha(x)
     @match (x.Age) begin
@@ -209,28 +224,28 @@ function get_alpha(x)
 end
 
 
-function get_alpha_comorb(x)
-if x.HIV == true
-    x.α = (9.9)*x.α
-    else
-    x.α = x.α
-end
+# function get_alpha_comorb(x)
+# if x.HIV == true
+#     x.α = (9.9)*x.α
+#     else
+#     x.α = x.α
+# end
 
-if x.Diab == true
-    x.α = (1.7)*x.α
-    else
-    x.α = x.α
-end
+# if x.Diab == true
+#     x.α = (1.7)*x.α
+#     else
+#     x.α = x.α
+# end
 
-if x.renal == true
-    x.α = (2.4)*x.α
-    else
-    x.α = x.α
-end
-if x.α > 1
-x.α = 1
-end
-end
+# if x.renal == true
+#     x.α = (2.4)*x.α
+#     else
+#     x.α = x.α
+# end
+# if x.α > 1
+# x.α = 1
+# end
+# end
 
 ## ------ Initiating the population ------ ##
 function init_pop()
@@ -310,6 +325,7 @@ function set_same_hh()
     end
 end
 
+
 function initialize()
     init_human()
     init_household()
@@ -330,12 +346,13 @@ function insert_infected(num)
             human[i].swap = ACTT
             human[i].tis = 0
             human[i].exp = 2
-            human[i].act_hist = true
+            human[i].is_act = true
 
         end
     end
 end
 export insert_infected
+
 
 
 reset_params() = reset_params(ModelParameters())
@@ -430,7 +447,7 @@ export runsim
 function main(ip::ModelParameters,lat_treat::String, act_treat::String, vaccov::Float64, test::String, trace::Float64, dd::Int64)
 
 reset_params(ip)
-get_parameters("Lat_a","Act_a", 0.0, "TST",0.1,4)
+get_parameters("Lat_a","Act_a", 0.0, "TST",0.25,4)
 hmatrix = zeros(Int16,total_population, p.sim_time)
 initialize()
 insert_infected(p.initial_infected)
@@ -442,7 +459,6 @@ for st = 1:p.sim_time
     set_scenario(st,lat_treat, act_treat, vaccov, test, trace, dd)
     save_states(st, hmatrix)
     tran_dyn(grps)
-    # test_contacts()
     sw = time_update()
 end
 return hmatrix
@@ -461,22 +477,22 @@ end
 function get_parameters(lat_treat::String, act_treat::String, vaccov::Float64, test::String, trace::Float64, dd::Int64)
     
     p.vaccin_cov = vaccov
-    p.test_sens = test == "TST" ? 0.70 : 0.90
+    p.test_sens = test == "TST" ? 0.77 : 0.90
     p.trace_cov = trace
     p.diagnosis = dd
 
-    if lat_treat == "Lat_a" #9 months of INH - daily or equivalent
+    if lat_treat == "Lat_a" #3 months of INH/RMP - daily or equivalent 
+            p.α_red = 0.93
+            p.lat_treat_time = 12
+            p.compliance = 0.95
+        elseif lat_treat == "Lat_b" #9 months of INH - daily or equivalent
             p.α_red = 0.9
             p.lat_treat_time = 39
-            p.compliance = 0.86
-        elseif lat_treat == "Lat_b"#6 months of INH - daily or equivalent
-            p.α_red = 0.01
+            p.compliance = 0.87
+        elseif lat_treat == "Lat_c" #6 months of INH - daily or equivalent 
+            p.α_red = 0.68 
             p.lat_treat_time = 26
-            p.compliance = 0.01
-        elseif lat_treat == "Lat_c" #3 months of INH/RMP - daily or equivalent
-            p.α_red = 0.64
-            p.lat_treat_time = 12
-            p.compliance = 0.97
+            p.compliance = 0.75 
         elseif lat_treat == "Lat_d" #3 months of INH/RPT once weekly or equivalent
             p.α_red = 0.68
             p.lat_treat_time = 12
@@ -495,11 +511,11 @@ function get_parameters(lat_treat::String, act_treat::String, vaccov::Float64, t
 
 
     if act_treat == "Act_a"
-        p.θ = 0.32
-        p.act_treat_time = 28
-    elseif act_treat == "Act_b" #Higher Success rate 
-        p.θ = p.θ
+        p.θ = 0.199
         p.act_treat_time = 16
+    elseif act_treat == "Act_b" #Higher Success rate 
+        p.θ = 0.199
+        p.act_treat_time = 28
     end
 
 end
@@ -522,12 +538,22 @@ function make_pop_older(sys_time)
         x.exp = 99999
         x.treated = false
         x.vaccinated = false
-        x.act_hist = false
+        x.is_act = false
+        x.is_inf = false
         x.nextweek_meets = 0
-        x.will_act = false
-        x.HIV = false
-        x.Diab = false
-        x.renal = false
+        x.iso = false
+        x.spend = 99999
+
+
+        x.cont_hist_1 = []
+        x.cont_hist_2 = []
+        x.cont_hist_3 = []
+        x.cont_hist_4 = []
+        
+        # x.HIV = false
+        # x.Diab = false
+        # x.renal = false
+
         apply_age_g(x)
         find_repeat(x)
         end 
@@ -547,12 +573,21 @@ function kill_infected()
         x.exp = 99999
         x.treated = false
         x.vaccinated = false
-        x.act_hist = false
+        x.is_act = false
+        x.is_inf = false
         x.nextweek_meets = 0
-        x.will_act = false
-        x.HIV = false
-        x.Diab = false
-        x.renal = false
+        x.iso = false
+        x.spend = 99999
+
+        x.cont_hist_1 = []
+        x.cont_hist_2 = []
+        x.cont_hist_3 = []
+        x.cont_hist_4 = []
+
+        # x.HIV = false
+        # x.Diab = false
+        # x.renal = false
+
         apply_age_g(x)
         find_repeat(x)
             end
@@ -566,33 +601,34 @@ function tran_dyn(grps)
     totalmet = 0
     totalinf = 0
 
-inf = findall(x-> x.Health == ACT || x.Health== ACTT && x.tis in (1,2) , human )
+inf = findall(x-> x.Health == ACT || (x.Health== ACTT && x.tis in (1,2)) , human )
 
     beta = p.β
 
 for xid in inf
     x = human[xid]
     
-    if x.tis== 2
+    if x.tis == 2 && x.Health == ACTT
         beta = (p.β)/2
     end
-    
-    if x.tis>=3
-        x.iso = false
-    end
 
+    if x.Age <=12  ##Children do not transmit the disease
+        beta = 0.05*beta
+    end
+    
+    hh_ratio = get_ratio(x) ##gets the ratio of household contacts
 
     cnt = x.nextweek_meets
 
     if length(x.same_hh)!=0 #Splits the number of contacts between hh and community
-    cnt_hh = Int(round(cnt*0.85))
+    cnt_hh = Int(round(cnt*hh_ratio))
     cnt_c = x.iso == true ? 0 : (cnt-cnt_hh)
     else
     cnt_hh = 0
     cnt_c = cnt
     end
     
-    cnt_rep = Int(round(cnt_c*0.85,RoundUp)) #This is the contact for repeated contacts
+    cnt_rep = Int(round(cnt_c*0.80,RoundUp)) #This is the contact for repeated contacts
     cnt_left = cnt_c - cnt_rep
 
 
@@ -613,10 +649,7 @@ for xid in inf
                     y.swap = LAT
                     y.exp = y.tis #The infected individul becomes latent rightaway
                     y.sickfrom = x.id
-                    if rand()< (p.test_sens)
-                        y.treated = true
-                    end
-                        
+                    y.is_inf = true
                 end
             
             end
@@ -630,6 +663,12 @@ for xid in inf
     @label rep_trans
 
      meet_rep = rand(x.rep_contact,cnt_rep) #sampling contacts from hh
+     
+     x.cont_hist_4= deepcopy(x.cont_hist_3)
+     x.cont_hist_3= deepcopy(x.cont_hist_2)
+     x.cont_hist_2= deepcopy(x.cont_hist_1)
+     x.cont_hist_1= deepcopy(meet_rep)
+
         for j in meet_rep
             y = human[j]
             ycnt = y.nextweek_meets
@@ -643,15 +682,11 @@ for xid in inf
                     y.swap = LAT
                     y.exp = y.tis #The infected individul becomes latent rightaway
                     y.sickfrom = x.id
-                    if rand()<(p.trace_cov)*(p.test_sens)
-                        y.treated = true
-                    end
-                        
+                    y.is_inf = true
                 end
             
             end
         end
-    
 
 
     @label left_tran
@@ -673,41 +708,102 @@ for xid in inf
                     y.swap = LAT
                     y.exp = y.tis #The infected individul becomes latent rightaway
                     y.sickfrom = x.id
-
+                    y.is_inf = true
                 end
             
             end
 
             
         end
-    end
+
+    end    
+
             
-end #for end
+end #for xid in inf
 
-
-
-        return totalmet, totalinf
+return totalmet, totalinf
 end #function end
 export tran_dyn
 
 
 
-# function test_contacts()
-#     infector = findall(x-> x.Health == ACTT && x.tis >=3,human)
-#     for xid in infector
-#         x = human[xid]
-#         infectee = findall(y -> y.sickfrom == x.id && y.Hid != x.Hid, human)
-#         length(infectee) == 0 && continue
-#         tested = rand(infectee,Int(round(p.trace_cov*length(infectee))))
-#         for yid in tested
-#             if rand()<(p.test_sens)
-#                 human[yid].treated = true
-#             end
-                
-#         end
-#     end
+function test_contacts(x::Human)
 
-# end
+    if x.Health == ACTT && x.tis == 1
+        for i in x.same_hh
+        y = human[i]
+        rn = rand()
+        
+            if y.is_inf == true
+                if rn < (p.test_sens)
+                y.treated = true
+                y.spend = deepcopy(y.tis) #We store time that the person has already spent in latent stage
+                else
+                    if rand()<(p.test_sens)
+                    y.treated = true
+                    y.spend = deepcopy(y.tis)+8 #This test is done 8 weeks later
+                    end
+                end
+            end
+        end
+        
+
+        # last4weeks = union(x.cont_hist_1,x.cont_hist_2,x.cont_hist_3,x.cont_hist_4)
+        # who_to_test = sample(last4weeks,Int(round(length(last4weeks)*p.trace_cov,RoundUp)),replace = false)
+
+        
+        if isempty(x.cont_hist_1) == true
+            week1 = []
+        else
+            week1 = sample(x.cont_hist_1,Int(round(length(x.cont_hist_1)*(1),RoundUp)),replace = false)
+        end
+        
+        if isempty(x.cont_hist_2) == true
+            week2 = []
+        else
+            week2 = sample(x.cont_hist_2,Int(round(length(x.cont_hist_2)*(0.75),RoundUp)),replace = false)
+        
+        end
+        if isempty(x.cont_hist_3) == true
+            week3 = []
+        else
+            week3 = sample(x.cont_hist_3,Int(round(length(x.cont_hist_3)*(0.5),RoundUp)),replace = false)
+        end
+
+        if isempty(x.cont_hist_4) == true
+            week4 = []
+        else
+            week4 = sample(x.cont_hist_4,Int(round(length(x.cont_hist_4)*(0.25),RoundUp)),replace = false)
+        end
+
+        last4weeks = union(week1,week2,week3,week4)
+        who_to_test = sample(last4weeks,Int(round(length(last4weeks)*p.trace_cov,RoundUp)),replace = false)
+
+
+        for j in who_to_test
+            y = human[j]
+            b = rand()
+            if y.is_inf==true
+                if b < (p.test_sens)
+                y.treated = true
+                y.spend = deepcopy(y.tis)
+                else
+                    if rand()<(p.test_sens)
+                    y.treated = true
+                    y.spend = deepcopy(y.tis)+8 #This test is done 8 weeks later
+                    end
+                end
+
+
+
+            end
+        end
+    end
+end
+export test_contacts
+
+
+
 
 function get_grps()
 
@@ -756,9 +852,20 @@ function Move_to_Latent(x::Human)
     x.swap =  rand() < x.α ? ACT : UNDEF
     x.exp = x.swap == ACT ? lat_dur : 99999
 
-    if x.swap == ACT && x.treated
+    if x.swap == ACT && x.treated == true
+        if lat_dur >= x.spend
+            x.swap = LATT
+            x.exp = x.spend ##This needs to change
+        else
+            x.swap = ACT
+            x.exp = lat_dur
+        end
+    end
+
+    if x.swap == UNDEF && x.treated == true
         x.swap = LATT
-        x.exp = rand(1:4) #The person is diagnosed in the first 4 week after infection
+        x.exp = x.spend
+        x.is_safe = true
     end
 
 end
@@ -768,9 +875,14 @@ function Move_to_Latent_T(x::Human)
     x.Health = LATT
     x.tis = 0
     x.exp = p.lat_treat_time
+    if x.is_safe == true
+        x.swap = DS
+        x.vaccinated = rand()<p.vaccin_cov ? true : false
+    else
     x.swap = rand() < p.compliance ? SUSC : DS
     x.α = x.α * (1-p.α_red)
     x.vaccinated = rand()<p.vaccin_cov ? true : false
+    end
 
 end
 export Move_to_Latent_T
@@ -778,10 +890,13 @@ export Move_to_Latent_T
 function Move_to_Active(x::Human)
     x.Health = ACT
     x.tis = 0
-    x.exp = p.diagnosis #We expect that the person starts treatment after diagnosis time
+
+    x.exp = min(p.diagnosis,(x.spend-x.exp)) #We expect that the person starts treatment after diagnosis time
+
+
     x.treated = false
     x.vaccinated = false #we should reset the human
-    x.act_hist = true
+    x.is_act = true
     x.swap = ACTT
 
 end
@@ -789,9 +904,17 @@ export Move_to_Active
 
 function Move_to_Active_T(x::Human)
     x.Health = ACTT
+    x.identified = true
     x.tis = 0
     x.exp = p.act_treat_time
-    x.swap = rand()<p.θ ? SUSC : DS #If the treatment is successful the person is SUSC again, o.w, DS
+
+    if x.Age <=15
+        p.θ = 0.152
+    else
+        p.θ = 0.199
+    end
+
+    x.swap = rand()<p.θ ? DS : SUSC #If the treatment is successful the person is SUSC again, o.w, DS
     x.vaccinated = rand()<p.vaccin_cov ? true : false
     x.iso = true
 
@@ -803,19 +926,19 @@ function Move_to_Dormant(x::Human)
     x.tis = 0
     x.swap = ACT
 
-    if x.act_hist == true && x.vaccinated == true
+    if x.is_act == true && x.vaccinated == true
 
         x.exp = rand() < 0.46 ? rand(12:84) : 99999 #Reduction in Relapse rate due to vaccination
 
-    elseif x.act_hist == true && x.vaccinated == false
+    elseif x.is_act == true && x.vaccinated == false
 
         x.exp = rand(12:84) #No Vaccination, No Reduction in Relapse rate due to vaccination, person gets infected again
 
-    elseif x.act_hist == false && x.vaccinated == true
+    elseif x.is_act == false && x.vaccinated == true
 
         x.exp = rand()<x.α *0.55 ? get_latent_dur() : 99999 #Reduction in Activation rate due to vaccination
 
-    elseif x.act_hist == false && x.vaccinated == false
+    elseif x.is_act == false && x.vaccinated == false
 
         x.exp = rand()<x.α ? get_latent_dur() : 99999 #No Vaccination, No Reduction in Activation rate
 
@@ -833,9 +956,8 @@ function Move_to_Susceptible(x::Human)
     x.α   = get_alpha(x)
     x.treated = false
     x.vaccinated = false
-    x.act_hist = false
+    x.is_act = false
     x.nextweek_meets = 0
-    x.will_act = false
 end
 export Move_to_Susceptible
 
@@ -858,6 +980,13 @@ for x in human
     end
 
     get_nextweek_meets(x)
+    test_contacts(x)
+        
+    if x.tis>=3 && x.Health == ACTT
+        x.iso = false
+    end
+
+
 end
 return (lat, latt ,act , actt, ds, susc)
 end
@@ -877,23 +1006,23 @@ function get_nextweek_meets(x::Human)
     return nwm
 end
 
-function contact_matrix()
+function contact_matrix() ##Updated contact matrix for Canada
     # regular contacts, just with 5 age groups.
     #  0-4, 5-19, 20-49, 50-64, 65+
     CM = Array{Array{Float64, 1}, 1}(undef, 5)
-    CM[1] = [0.2287, 0.1839, 0.4219, 0.1116, 0.0539]
-    CM[2] = [0.0276, 0.5964, 0.2878, 0.0591, 0.0291]
-    CM[3] = [0.0376, 0.1454, 0.6253, 0.1423, 0.0494]
-    CM[4] = [0.0242, 0.1094, 0.4867, 0.2723, 0.1074]
-    CM[5] = [0.0207, 0.1083, 0.4071, 0.2193, 0.2446]
+    CM[1] = [0.33, 0.15, 0.37, 0.12, 0.04]
+    CM[2] = [0.04, 0.49, 0.35, 0.08, 0.04]
+    CM[3] = [0.04, 0.16, 0.56, 0.16, 0.07]
+    CM[4] = [0.04, 0.11, 0.43, 0.26, 0.16]
+    CM[5] = [0.02, 0.06, 0.27, 0.22, 0.44]
     return CM
 end
 
 
 function negative_binomials()
-    ## the means/sd here are calculated using _calc_avgag in Affan's code
+
     means = [10.21, 16.793, 13.7950, 11.2669, 8.0027]
-    sd = [7.65, 11.7201, 10.5045, 9.5935, 6.9638]
+    sd = [3.99, 5.7, 8.93, 7.86, 3.21]
     totalbraks = length(means)
     nbinoms = Vector{NegativeBinomial{Float64}}(undef, totalbraks)
     for i = 1:totalbraks
@@ -907,27 +1036,37 @@ const nbs = negative_binomials()
 const cm = contact_matrix()
 export negative_binomials, contact_matrix, nbs, cm
 
+function get_ratio(x::Human)
+    @match (x.AGC) begin
+        1 => 0.4045
+        2 => 0.3190
+        3 => 0.2404
+        4 => 0.3358
+        5 => 0.4092
+    end
+end
+
 function get_death_prob(x::Human)
     @match (x.Age) begin
-        0       =>   0.01699 
-        1:4     =>   0.00311
-        5:9     =>   0.0004
-        10:14   =>   0.00453
-        15:19   =>   0.01342
-        20:24   =>   0.0182
-        25:29   =>   0.01455
-        30:34   =>   0.01746 
-        35:39   =>   0.01011
-        40:44   =>   0.01392
-        45:49   =>   0.01926
-        50:54   =>   0.02582
-        55:69   =>   0.04499
-        60:64   =>   0.07417
-        65:69   =>   0.10719
-        70:74   =>   0.1785
-        75:79   =>   0.28416
-        80:84   =>   0.5065
-        85:89   =>   0.51711
+        0       =>   0.01874 
+        1:4     =>   0.00354
+        5:9     =>   0.00078
+        10:14   =>   0.00435
+        15:19   =>   0.01583
+        20:24   =>   0.01706
+        25:29   =>   0.01929
+        30:34   =>   0.02244 
+        35:39   =>   0.01112
+        40:44   =>   0.01708
+        45:49   =>   0.02329
+        50:54   =>   0.03159
+        55:69   =>   0.04843
+        60:64   =>   0.08084
+        65:69   =>   0.09403
+        70:74   =>   0.16250
+        75:79   =>   0.28122
+        80:84   =>   0.48882
+        85:89   =>   0.33187
         90:100   =>   1
         _ => println("No Age defined")
     end
@@ -959,4 +1098,6 @@ function get_new_AgeGroup(x::Human) #In every year when the person gets older, t
 end
 
 #end #module
+
+
 

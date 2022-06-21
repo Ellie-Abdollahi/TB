@@ -1,5 +1,5 @@
 # Evaluation of TB elimination strategies in Canadian Inuit population 
-Elaheh Abdollahi, 2021  
+Elaheh Abdollahi, 2022  
 Agent-Based Modeling Laboratory
 York University, Toronto, Canada
 
